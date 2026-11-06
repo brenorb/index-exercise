@@ -14,6 +14,26 @@ from codex import (
     get_history,
 )
 from dataset import PRBenchDataset
+from main import main
+
+
+@pytest.mark.parametrize("turns", [2, 6])
+def test_sample_preview_prints_each_available_prompt(turns, capsys):
+    prompts = [f"synthetic prompt {turn}" for turn in range(turns)]
+    dataset = Mock()
+    dataset.get_sample.return_value = {
+        "turns": turns,
+        **{f"prompt_{turn}": prompt for turn, prompt in enumerate(prompts)},
+    }
+    with patch("main.PRBenchDataset", return_value=dataset):
+        main()
+
+    dataset.load.assert_called_once_with()
+    dataset.get_sample.assert_called_once_with("finance", 0)
+    assert capsys.readouterr().out.splitlines()[-turns - 1:] == [
+        str(turns),
+        *(repr(prompt) for prompt in prompts),
+    ]
 
 # ============================================================================
 # Dataset Loading Tests
@@ -39,15 +59,16 @@ class TestDatasetLoading:
         assert dataset.cache_dir == Path(custom_path)
     
     @patch('dataset.load_dataset')
-    def test_dataset_load_from_huggingface(self, mock_load_dataset):
+    def test_dataset_load_from_huggingface(self, mock_load_dataset, tmp_path):
         """Test loading dataset from HuggingFace when no cache exists."""
-        mock_data = {"finance": [{"topic": "test"}]}
+        mock_data = Mock()
         mock_load_dataset.return_value = mock_data
         
-        dataset = PRBenchDataset(cache_dir="./nonexistent_cache")
+        dataset = PRBenchDataset(cache_dir=tmp_path / "cache")
         result = dataset.load()
         
         mock_load_dataset.assert_called_once_with("ScaleAI/PRBench")
+        mock_data.save_to_disk.assert_called_once_with(str(dataset.cache_dir))
         assert result == mock_data
         assert dataset.dataset == mock_data
     
@@ -69,19 +90,19 @@ class TestDatasetLoading:
     
     @patch('dataset.load_dataset')
     @patch('dataset.load_from_disk')
-    def test_dataset_load_cache_fallback(self, mock_load_from_disk, mock_load_dataset):
+    def test_dataset_load_cache_fallback(self, mock_load_from_disk, mock_load_dataset, tmp_path):
         """Test that loading falls back to HuggingFace if cache fails."""
         mock_load_from_disk.side_effect = Exception("Cache corrupt")
-        mock_data = {"finance": [{"topic": "fresh"}]}
+        mock_data = Mock()
         mock_load_dataset.return_value = mock_data
         
-        dataset = PRBenchDataset()
-        
-        with patch.object(Path, 'exists', return_value=True):
-            result = dataset.load()
+        dataset = PRBenchDataset(cache_dir=tmp_path / "cache")
+        dataset.cache_dir.mkdir()
+        result = dataset.load()
         
         mock_load_from_disk.assert_called_once()
         mock_load_dataset.assert_called_once_with("ScaleAI/PRBench")
+        mock_data.save_to_disk.assert_called_once_with(str(dataset.cache_dir))
         assert result == mock_data
     
     def test_get_sample(self):
@@ -109,13 +130,13 @@ class TestDatasetLoading:
         """Test that get_sample auto-loads dataset if not loaded."""
         dataset = PRBenchDataset()
         
-        with patch.object(dataset, 'load') as mock_load:
-            mock_load.return_value = {"finance": [{"topic": "test"}]}
+        def load_fixture():
             dataset.dataset = {"finance": [{"topic": "test"}]}
-            
-            dataset.get_sample("finance", 0)
-            
-            mock_load.assert_called_once()
+
+        with patch.object(dataset, 'load', side_effect=load_fixture) as mock_load:
+            assert dataset.get_sample("finance", 0) == {"topic": "test"}
+
+        mock_load.assert_called_once()
     
     def test_get_samples_multiple(self):
         """Test retrieving multiple samples from the dataset."""

@@ -29,11 +29,10 @@ def main():
     print("\n📋 Getting a sample task from the dataset...")
     sample = prbench.get_sample("finance", 0)
 
-    pprint(sample['turns'])
-    pprint(sample['prompt_0'])
-    pprint(sample['prompt_1'])
-    pprint(sample['prompt_2'])
-    pprint(sample['prompt_3'])
+    turns = sample['turns']
+    pprint(turns)
+    for turn in range(turns):
+        pprint(sample[f'prompt_{turn}'])
     
     # print(f"Topic: {sample['topic']}")
     # print(f"Expert: {sample['expert']}")
